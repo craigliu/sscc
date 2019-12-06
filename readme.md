@@ -6,6 +6,8 @@
 
 #### 架构图
 
+![架构图](https://raw.githubusercontent.com/craigliu/sscc/master/strong-consistent-cache.png)
+
 
 
 #### 搭建和运行
