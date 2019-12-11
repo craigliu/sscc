@@ -24,7 +24,7 @@ public class PerformanceTest {
     ObjectMapper objectMapper = new ObjectMapper();
 
     static int RECORDS_COUNT = 1000;
-    static int WR_TIMES = 100000;
+    static int WR_TIMES = 10000;
 
     @Before
     public void setup() throws SQLException, JsonProcessingException {
@@ -76,7 +76,7 @@ public class PerformanceTest {
 
         long startTs = Instant.now().toEpochMilli();
 
-        AtomicInteger timeoutCount = new AtomicInteger();
+        AtomicInteger dbReadCount = new AtomicInteger();
 
         for (int i = 0; i < threadNum; i ++) {
             Thread thread = new Thread(() -> {
@@ -96,23 +96,7 @@ public class PerformanceTest {
                         // 1. 写数据
                         if (randomNumber == 0) {
                             try {
-                                cache.write(key, SampleObject.class, key1 -> {
-                                    try(Connection conn = connectionPool.getConnection()) {
-                                        PreparedStatement statement = conn.prepareStatement("select value from cache where `key` = ?");
-
-                                        statement.setString(1, key1);
-                                        ResultSet rs =  statement.executeQuery();
-
-                                        if (rs.next()) {
-                                            String json = rs.getString("value");
-                                            return objectMapper.readValue(json, SampleObject.class);
-                                        }
-                                    } catch (SQLException | JsonProcessingException e) {
-                                        e.printStackTrace();
-                                    }
-
-                                    return null;
-                                }, () -> {
+                                cache.write(key, SampleObject.class, () -> {
                                     SampleObject newObj = new SampleObject(key, 0);
 
                                     try(Connection conn = connectionPool.getConnection()) {
@@ -131,14 +115,26 @@ public class PerformanceTest {
                             }
                         } else {
                             // 2. 读数据
-                            try {
-                                cache.get(key, SampleObject.class, 50);
-                            } catch (InterruptedException | ExecutionException e) {
-                                e.printStackTrace();
-                            } catch (ReadTimeoutException e) {
-                                timeoutCount.incrementAndGet();
-                                e.printStackTrace();
-                            }
+                            cache.get(key, SampleObject.class, key1 -> {
+                                try(Connection conn = connectionPool.getConnection()) {
+                                    PreparedStatement statement = conn.prepareStatement("select value from cache where `key` = ?");
+
+                                    statement.setString(1, key1);
+                                    ResultSet rs =  statement.executeQuery();
+
+                                    dbReadCount.incrementAndGet();
+
+                                    if (rs.next()) {
+                                        String json = rs.getString("value");
+
+                                        return objectMapper.readValue(json, SampleObject.class);
+                                    }
+                                } catch (SQLException | JsonProcessingException e) {
+                                    e.printStackTrace();
+                                }
+
+                                return null;
+                            }, 50);
                         }
                     }
                 } finally {
@@ -162,6 +158,6 @@ public class PerformanceTest {
         double timeCostPerRequest = Double.valueOf(timeCost) / totalRequest;
 
         System.out.println(String.format(String.format("每个请求消耗 %f ms", timeCostPerRequest)));
-        System.out.println(String.format("超时错误共 %d 个", timeoutCount.get()));
+        System.out.println(String.format("从DB读值 %d 个", dbReadCount.get()));
     }
 }

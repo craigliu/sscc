@@ -5,13 +5,12 @@ import org.junit.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
 
 @SpringBootTest
 public class AllTest {
 
     @Test
-    public void testGet() throws InterruptedException, ReadTimeoutException, ExecutionException {
+    public void testGet() {
         Cache cache = new Cache();
 
         String value = cache.get(new ReadOperation<String>() {
@@ -21,21 +20,26 @@ public class AllTest {
             }
 
             @Override
-            public Object readFromDB(String key) {
+            public String readFromCache(String key) {
+                return "value";
+            }
+
+            @Override
+            public String readFromDB(String key) {
                 return null;
             }
 
             @Override
-            public String readFromCache(String key) {
-                return "value";
+            public void setCache(String key, String obj) {
+
             }
         }, 1000);
 
         Assert.assertEquals("value", value);
     }
 
-    @Test(expected = ReadTimeoutException.class)
-    public void testGetTimeout() throws InterruptedException, ReadTimeoutException, ExecutionException {
+    @Test
+    public void testGetTimeout() {
         Cache cache = new Cache();
 
         CountDownLatch countDownLatch = new CountDownLatch(1);
@@ -56,18 +60,8 @@ public class AllTest {
             }
 
             @Override
-            public void setCache(String key, Object obj) {
-                countDownLatch.countDown(); // 模拟写入数据库后更新缓存
-            }
-
-            @Override
             public String key() {
                 return "test-key";
-            }
-
-            @Override
-            public Object readFromDB(String key) {
-                return null;
             }
         });
 
@@ -78,26 +72,30 @@ public class AllTest {
             }
 
             @Override
-            public Object readFromDB(String key) {
-                return null;
+            public void setCache(String key, String obj) {
+                countDownLatch.countDown(); // 写缓存完成
             }
 
             @Override
             public String readFromCache(String key) {
-                // 模拟写操作未完成时取得为空值的情况
-                if (countDownLatch.getCount() > 0) {
-                    return null;
+                if (countDownLatch.getCount() == 0) {
+                    return "cache value";
                 } else {
-                    return "value";
+                    return null;
                 }
+            }
+
+            @Override
+            public String readFromDB(String key) {
+                return "db value";
             }
         }, 1000);
 
-        Assert.assertEquals("value", value);
+        Assert.assertEquals("db value", value);
     }
 
     @Test
-    public void testGetAfterWrite() throws InterruptedException, ReadTimeoutException, ExecutionException {
+    public void testGetAfterWrite() {
         Cache cache = new Cache();
 
         CountDownLatch countDownLatch = new CountDownLatch(1);
@@ -118,18 +116,8 @@ public class AllTest {
             }
 
             @Override
-            public void setCache(String key, Object obj) {
-                countDownLatch.countDown();
-            }
-
-            @Override
             public String key() {
                 return "test-key";
-            }
-
-            @Override
-            public Object readFromDB(String key) {
-                return null;
             }
         });
 
@@ -137,11 +125,6 @@ public class AllTest {
             @Override
             public String key() {
                 return "test-key";
-            }
-
-            @Override
-            public Object readFromDB(String key) {
-                return null;
             }
 
             @Override
@@ -154,6 +137,16 @@ public class AllTest {
                     System.out.println("读到缓存啦");
                     return "value";
                 }
+            }
+
+            @Override
+            public String readFromDB(String key) {
+                return "new db value";
+            }
+
+            @Override
+            public void setCache(String key, String obj) {
+                countDownLatch.countDown();
             }
         }, 5000);
 

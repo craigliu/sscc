@@ -34,7 +34,7 @@ public class JedisSSCCache {
         }
     }
 
-    public <T> T get(String key, Class<T> clazz, int timeout) throws InterruptedException, ReadTimeoutException, ExecutionException {
+    public <T> T get(String key, Class<T> clazz, DBReader<T> reader, int timeout) {
         return cache.get(new ReadOperation<T>() {
             @Override
             public String key() {
@@ -42,8 +42,20 @@ public class JedisSSCCache {
             }
 
             @Override
-            public Object readFromDB(String key) {
-                return null; // TODO: 如果缓存取失败可能要fallback到数据库取
+            public void setCache(String key, T obj) {
+                String json = null;
+
+                Jedis jedis = jedisPool.getResource();
+
+                try {
+                    json = mapper.writeValueAsString(obj);
+
+                    jedis.set(key, json);
+                } catch (JsonProcessingException e) {
+                    e.printStackTrace(); // TODO: 处理序列化失败情况
+                } finally {
+                    jedis.close();
+                }
             }
 
             @Override
@@ -67,10 +79,15 @@ public class JedisSSCCache {
                     jedis.close();
                 }
             }
+
+            @Override
+            public T readFromDB(String key) {
+                return reader.readFromDB(key);
+            }
         }, timeout);
     }
 
-    public <T> void write(String key, Class<T> clazz, DBReader<T> reader, DBWriter<T> writer)
+    public <T> void write(String key, Class<T> clazz, DBWriter<T> writer)
             throws ExecutionException, InterruptedException {
         cache.write(new WriteOperation<T>() {
             @Override
@@ -90,30 +107,8 @@ public class JedisSSCCache {
             }
 
             @Override
-            public void setCache(String key, T obj) {
-                String json = null;
-
-                Jedis jedis = jedisPool.getResource();
-
-                try {
-                    json = mapper.writeValueAsString(obj);
-
-                    jedis.set(key, json);
-                } catch (JsonProcessingException e) {
-                    e.printStackTrace(); // TODO: 处理序列化失败情况
-                } finally {
-                    jedis.close();
-                }
-            }
-
-            @Override
             public String key() {
                 return key;
-            }
-
-            @Override
-            public Object readFromDB(String key) {
-                return reader.readFromDB(key);
             }
         });
     }

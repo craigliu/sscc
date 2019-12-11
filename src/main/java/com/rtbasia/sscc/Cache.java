@@ -1,5 +1,6 @@
 package com.rtbasia.sscc;
 
+import java.time.Instant;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 
@@ -7,24 +8,35 @@ public class Cache {
     private TaskBuilder taskBuilder = new TaskBuilder();
     private TaskQueue taskQueue = new TaskQueue();
 
-    public <T> T get(ReadOperation<T> readOps, int timeout) throws ReadTimeoutException,
-            InterruptedException, ExecutionException {
-        FutureTask<T> task = taskBuilder.buildReadTask(readOps, timeout);
-        taskQueue.offerRead(task, readOps.key());
+    public <T> T get(ReadOperation<T> readOps, long timeout) {
+        T cachedObj = readOps.readFromCache(readOps.key());
 
-        try {
-            return task.get(); // TODO: 处理超时的情况, 可能需要直接从DB读旧的数据
-        } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
+        // 缓存中有值，直接返回
+        if (cachedObj != null) {
+            return cachedObj;
+        }
 
-            if (cause instanceof ReadTimeoutException) {
-                ReadTimeoutException rte = new ReadTimeoutException(cause.getMessage());
-                rte.initCause(cause);
+        FutureTask<T> task = taskBuilder.buildReadTask(readOps);
+        taskQueue.offer(task, readOps.key());
 
-                throw rte;
+        // 重复尝试从cache中取值直到超时
+        long startMilliSecs = Instant.now().toEpochMilli();
+
+        while (true) {
+            long nowMilliSecs = Instant.now().toEpochMilli();
+            long timeElapsed = nowMilliSecs - startMilliSecs;
+
+            // 超时，直接从DB取值
+            if (timeElapsed > timeout) {
+                return readOps.readFromDB(readOps.key());
             }
 
-            throw e;
+            // 能从cache中取到值了，直接返回
+            cachedObj = readOps.readFromCache(readOps.key());
+
+            if (cachedObj != null) {
+                return cachedObj;
+            }
         }
     }
 
@@ -36,7 +48,7 @@ public class Cache {
 
     public FutureTask writeAsync(WriteOperation writeOps) {
         FutureTask task = taskBuilder.buildWriteTask(writeOps);
-        taskQueue.offerWrite(task, writeOps.key());
+        taskQueue.offer(task, writeOps.key());
 
         return task;
     }
